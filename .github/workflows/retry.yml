@@ -1,8 +1,10 @@
 name: Crear VM ARM en Oracle (reintentos)
 
 on:
+  # Cada corrida reintenta ~5 h (un pedido cada ~5 min) y al terminar lanza la siguiente.
+  # El cron es solo red de seguridad por si la cadena se corta (GitHub lo dispara con atraso o lo saltea).
   schedule:
-    - cron: '*/5 * * * *'   # GitHub puede atrasarlo unos minutos
+    - cron: '17 */3 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -16,7 +18,7 @@ permissions:
 jobs:
   launch:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 340
     steps:
       - uses: actions/checkout@v4
 
@@ -32,12 +34,13 @@ jobs:
           printf '%s\n' "$SSH_PUBLIC_KEY" > ~/.oci/ssh.pub
           chmod 600 ~/.oci/*
 
-      - name: Un intento
+      - name: Reintentos (~5 h)
         env:
           OCI_KEY_FILE: ~/.oci/key.pem
           SSH_PUBLIC_KEY: ~/.oci/ssh.pub
           CLOUD_INIT: cloud-init.yaml
-          MAX_ATTEMPTS: '1'
+          MAX_ATTEMPTS: '58'
+          INTERVAL_SEC: '300'
           ATTEMPT_OFFSET: ${{ github.run_number }}
           QUIET: '1'
           RESULT_FILE: result.txt
@@ -50,6 +53,12 @@ jobs:
         run: |
           gh issue create --title "VM ARM creada: $(cat result.txt)" --body "La VM existe y está RUNNING. IP pública: $(cat result.txt). Los reintentos quedaron desactivados."
           gh workflow disable retry.yml
+
+      - name: Lanzar la siguiente corrida
+        if: success() && hashFiles('result.txt') == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run retry.yml --ref main
 
       - name: Borrar credenciales
         if: always()
