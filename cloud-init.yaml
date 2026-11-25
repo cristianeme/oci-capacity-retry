@@ -1,0 +1,13 @@
+#cloud-config
+# Script de inicialización de la VM de Oracle (Ubuntu 24.04): se carga en "Initialization script" al crear la instancia.
+# Instala git y Docker, y abre 80/443 en el firewall del sistema (Oracle trae iptables con REJECT por defecto).
+# Los puertos también hay que abrirlos en la Security List de la VCN (consola de Oracle).
+package_update: true
+packages:
+  - git
+runcmd:
+  - iptables -I INPUT 6 -p tcp -m multiport --dports 80,443 -j ACCEPT
+  - netfilter-persistent save
+  - curl -fsSL https://get.docker.com | sh
+  - usermod -aG docker ubuntu
+  - systemctl enable --now docker

@@ -1,0 +1,56 @@
+name: Crear VM ARM en Oracle (reintentos)
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # GitHub puede atrasarlo unos minutos
+  workflow_dispatch:
+
+concurrency:
+  group: oci-launch
+  cancel-in-progress: false
+
+permissions:
+  actions: write   # para desactivar el workflow cuando la VM ya existe
+  issues: write    # para avisar con un issue (llega por mail)
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Credenciales de OCI (desde secretos)
+        env:
+          OCI_CONFIG: ${{ secrets.OCI_CONFIG }}
+          OCI_KEY: ${{ secrets.OCI_KEY }}
+          SSH_PUBLIC_KEY: ${{ vars.SSH_PUBLIC_KEY }}
+        run: |
+          mkdir -p ~/.oci
+          printf '%s\n' "$OCI_CONFIG" > ~/.oci/config
+          printf '%s\n' "$OCI_KEY" > ~/.oci/key.pem
+          printf '%s\n' "$SSH_PUBLIC_KEY" > ~/.oci/ssh.pub
+          chmod 600 ~/.oci/*
+
+      - name: Un intento
+        env:
+          OCI_KEY_FILE: ~/.oci/key.pem
+          SSH_PUBLIC_KEY: ~/.oci/ssh.pub
+          CLOUD_INIT: cloud-init.yaml
+          MAX_ATTEMPTS: '1'
+          ATTEMPT_OFFSET: ${{ github.run_number }}
+          QUIET: '1'
+          RESULT_FILE: result.txt
+        run: node oci-launch.mjs
+
+      - name: Avisar y detener los reintentos
+        if: hashFiles('result.txt') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --title "VM ARM creada: $(cat result.txt)" --body "La VM existe y está RUNNING. IP pública: $(cat result.txt). Los reintentos quedaron desactivados."
+          gh workflow disable retry.yml
+
+      - name: Borrar credenciales
+        if: always()
+        run: rm -rf ~/.oci
